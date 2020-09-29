@@ -92,7 +92,7 @@ undeploy-k8s: undeploy
 _plugin-%:
 	@hack/build-plugins.sh $*
 
-plugins: _plugin-intel _plugin-mellanox _plugin-generic
+plugins: _plugin-intel _plugin-mellanox _plugin-generic _plugin-virtual
 
 verify-gofmt:
 ifeq (, $(GOFMT_CHECK))

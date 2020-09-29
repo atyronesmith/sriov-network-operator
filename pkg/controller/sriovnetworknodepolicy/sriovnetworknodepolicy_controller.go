@@ -599,6 +599,10 @@ func renderDevicePluginConfigData(pl *sriovnetworkv1.SriovNetworkNodePolicyList)
 				netDeviceSelectors.Drivers = sriovnetworkv1.UniqueAppend(netDeviceSelectors.Drivers, p.Spec.DeviceType)
 			}
 
+			if len(p.Spec.NicSelector.RootDevices) > 0 {
+				netDeviceSelectors.PciAddresses = sriovnetworkv1.UniqueAppend(netDeviceSelectors.PciAddresses, p.Spec.NicSelector.RootDevices...)
+			}
+
 			netDeviceSelectorsMarshal, err := json.Marshal(netDeviceSelectors)
 			if err != nil {
 				return rcl, err
@@ -629,6 +633,10 @@ func renderDevicePluginConfigData(pl *sriovnetworkv1.SriovNetworkNodePolicyList)
 			}
 			if l := len(p.Spec.NicSelector.PfNames); l > 0 {
 				netDeviceSelectors.PfNames = append(netDeviceSelectors.PfNames, p.Spec.NicSelector.PfNames...)
+			}
+
+			if len(p.Spec.NicSelector.RootDevices) > 0 {
+				netDeviceSelectors.PciAddresses = sriovnetworkv1.UniqueAppend(netDeviceSelectors.PciAddresses, p.Spec.NicSelector.RootDevices...)
 			}
 			// Removed driver constraint for "netdevice" DeviceType
 			if p.Spec.DeviceType == "vfio-pci" {

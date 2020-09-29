@@ -107,9 +107,11 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		destdir = "/host/etc"
 	}
 
+	platformType := daemon.Virtual
+
 	// block the deamon process until nodeWriter finish first its run
-	nodeWriter.Run(stopCh, refreshCh, syncCh, destdir, true)
-	go nodeWriter.Run(stopCh, refreshCh, syncCh, "", false)
+	nodeWriter.Run(stopCh, refreshCh, syncCh, destdir, true, platformType)
+	go nodeWriter.Run(stopCh, refreshCh, syncCh, "", false, platformType)
 
 	glog.V(0).Info("Starting SriovNetworkConfigDaemon")
 	err = daemon.New(
@@ -120,6 +122,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		stopCh,
 		syncCh,
 		refreshCh,
+		platformType,
 	).Run(stopCh, exitCh)
 	if err != nil {
 		glog.Errorf("failed to run daemon: %v", err)
