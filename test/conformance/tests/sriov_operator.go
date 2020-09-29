@@ -175,6 +175,14 @@ var _ = Describe("[sriov] operator", func() {
 				waitForSRIOVStable()
 				sriovDevice, err = sriovInfos.FindOneSriovDevice(node)
 				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() int64 {
+					testedNode, err := clients.Nodes().Get(context.Background(), node, metav1.GetOptions{})
+					Expect(err).ToNot(HaveOccurred())
+					resNum, _ := testedNode.Status.Allocatable[corev1.ResourceName("openshift.io/"+resourceName)]
+					allocatable, _ := resNum.AsInt64()
+					return allocatable
+				}, 10*time.Minute, time.Second).Should(Equal(int64(numVfs)))
 			}
 		})
 
@@ -215,7 +223,11 @@ var _ = Describe("[sriov] operator", func() {
 				var runningPod *corev1.Pod
 				Eventually(func() corev1.PodPhase {
 					runningPod, err = clients.Pods(namespaces.Test).Get(context.Background(), created.Name, metav1.GetOptions{})
+					if errors.IsNotFound(err) {
+						return corev1.PodUnknown
+					}
 					Expect(err).ToNot(HaveOccurred())
+
 					return runningPod.Status.Phase
 				}, 3*time.Minute, time.Second).Should(Equal(corev1.PodRunning))
 
@@ -687,11 +699,10 @@ var _ = Describe("[sriov] operator", func() {
 				}, 10*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
 
 				macvlanNadName := "macvlan-nad"
-				nodeNicName := sriovInfos.States[node].Status.Interfaces[0].Name
-				macvlanNad := network.CreateMacvlanNetworkAttachmentDefinition(macvlanNadName, namespaces.Test, nodeNicName)
-				defer clients.Delete(context.Background(), &macvlanNad)
+				macvlanNad := network.CreateMacvlanNetworkAttachmentDefinition(macvlanNadName, namespaces.Test)
 				err = clients.Create(context.Background(), &macvlanNad)
 				Expect(err).ToNot(HaveOccurred())
+				defer clients.Delete(context.Background(), &macvlanNad)
 				Eventually(func() error {
 					netAttDef := &netattdefv1.NetworkAttachmentDefinition{}
 					return clients.Get(context.Background(), runtimeclient.ObjectKey{Name: macvlanNadName, Namespace: namespaces.Test}, netAttDef)
@@ -707,7 +718,7 @@ var _ = Describe("[sriov] operator", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				sriovVfDriver := getDriver(stdout)
-				Expect(cluster.IsDriverSupported(sriovVfDriver)).To(BeTrue())
+				Expect(cluster.IsVFDriverSupported(sriovVfDriver)).To(BeTrue())
 
 				stdout, _, err = pod.ExecCommand(clients, createdPod, "ethtool", "-i", "net2")
 				macvlanDriver := getDriver(stdout)
@@ -718,6 +729,12 @@ var _ = Describe("[sriov] operator", func() {
 		})
 
 		Context("Virtual Functions", func() {
+			if discovery.Enabled() {
+				Skip("Virtual functions allocation test consumes all the available vfs, not suitable for discovery mode")
+				// TODO Split this so we check the allocation / unallocation but with a limited number of
+				// resources.
+			}
+
 			// 21396
 			It("should release the VFs once the pod deleted and same VFs can be used by the new created pods", func() {
 				By("Create first Pod which consumes all available VFs")
@@ -1010,37 +1027,18 @@ var _ = Describe("[sriov] operator", func() {
 					var unusedSriovDevice *sriovv1.InterfaceExt
 
 					if discovery.Enabled() {
-						var numVfs int
-						var err error
-						testNode, resourceName, numVfs, unusedSriovDevice, err = discovery.DiscoveredResources(clients,
-							sriovInfos, operatorNamespace, defaultFilterPolicy,
-							func(node string, sriovDeviceList []*sriovv1.InterfaceExt) (*sriovv1.InterfaceExt, bool) {
-								if len(sriovDeviceList) == 0 {
-									return nil, false
-								}
-								unusedSriovDevices, err := findUnusedSriovDevices(node, sriovDeviceList)
-								if err != nil && len(unusedSriovDevices) == 0 {
-									return nil, false
-								}
-								return unusedSriovDevices[0], true
-							},
-						)
-
-						Expect(err).ToNot(HaveOccurred())
-						if testNode == "" || resourceName == "" || numVfs < 5 || unusedSriovDevice == nil {
-							Skip("Insufficient resources to run tests in discovery mode")
-						}
-					} else {
-						testNode = sriovInfos.Nodes[0]
-						sriovDeviceList, err := sriovInfos.FindSriovDevices(testNode)
-						Expect(err).ToNot(HaveOccurred())
-						unusedSriovDevices, err := findUnusedSriovDevices(testNode, sriovDeviceList)
-						Expect(err).ToNot(HaveOccurred())
-						unusedSriovDevice = unusedSriovDevices[0]
-						defer changeNodeInterfaceState(testNode, unusedSriovDevices[0].Name, true)
-						Expect(err).ToNot(HaveOccurred())
-						createSriovPolicy(unusedSriovDevice.Name, testNode, 2, resourceName)
+						Skip("PF Shutdown test not enabled in discovery mode")
 					}
+
+					testNode = sriovInfos.Nodes[0]
+					sriovDeviceList, err := sriovInfos.FindSriovDevices(testNode)
+					Expect(err).ToNot(HaveOccurred())
+					unusedSriovDevices, err := findUnusedSriovDevices(testNode, sriovDeviceList)
+					Expect(err).ToNot(HaveOccurred())
+					unusedSriovDevice = unusedSriovDevices[0]
+					defer changeNodeInterfaceState(testNode, unusedSriovDevices[0].Name, true)
+					Expect(err).ToNot(HaveOccurred())
+					createSriovPolicy(unusedSriovDevice.Name, testNode, 2, resourceName)
 
 					ipam := `{
 						"type":"host-local",
@@ -1050,7 +1048,8 @@ var _ = Describe("[sriov] operator", func() {
 						"routes":[{"dst":"0.0.0.0/0"}],
 						"gateway":"10.10.10.1"
 						}`
-					err := network.CreateSriovNetwork(clients, unusedSriovDevice, sriovNetworkName, namespaces.Test, operatorNamespace, resourceName, ipam)
+
+					err = network.CreateSriovNetwork(clients, unusedSriovDevice, sriovNetworkName, namespaces.Test, operatorNamespace, resourceName, ipam)
 					Expect(err).ToNot(HaveOccurred())
 					Eventually(func() error {
 						netAttDef := &netattdefv1.NetworkAttachmentDefinition{}
@@ -1113,8 +1112,11 @@ var _ = Describe("[sriov] operator", func() {
 						}
 					} else {
 						node = sriovInfos.Nodes[0]
-						intf, err = sriovInfos.FindOneSriovDevice(node)
+						sriovDeviceList, err := sriovInfos.FindSriovDevices(node)
 						Expect(err).ToNot(HaveOccurred())
+						unusedSriovDevices, err := findUnusedSriovDevices(node, sriovDeviceList)
+						Expect(err).ToNot(HaveOccurred())
+						intf = unusedSriovDevices[0]
 
 						mtuPolicy := &sriovv1.SriovNetworkNodePolicy{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1463,38 +1465,19 @@ func findUnusedSriovDevices(testNode string, sriovDevices []*sriovv1.InterfaceEx
 		stdout, _, err = pod.ExecCommand(clients, createdPod, "ip", "link", "show", device.Name)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(len(stdout)).Should(Not(Equal(0)), "Unable to query link state")
-		if strings.Index(stdout, "state DOWN") > 0 {
+		if strings.Contains(stdout, "state DOWN") {
+			continue // The interface is not active
+		}
+		if strings.Contains(stdout, "master ovs-system") {
 			continue // The interface is not active
 		}
 
-		isInterfaceSlave, err := isInterfaceSlave(createdPod, device.Name)
-		Expect(err).ToNot(HaveOccurred())
-		if isInterfaceSlave {
-			continue
-		}
 		filteredDevices = append(filteredDevices, device)
 	}
 	if len(filteredDevices) == 0 {
 		return nil, fmt.Errorf("Unused sriov devices not found")
 	}
 	return filteredDevices, nil
-}
-
-func isInterfaceSlave(ifcPod *k8sv1.Pod, ifcName string) (bool, error) {
-	stdout, _, err := pod.ExecCommand(clients, ifcPod, "bridge", "link")
-	if err != nil {
-		return false, err
-	}
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		parts := strings.Split(line, " ")
-		if len(parts) > 1 && parts[1] == ifcName {
-			if strings.Index(line, "master") != -1 { // Ignore hw bridges
-				return true, nil // The interface is part of a bridge (it has a master)
-			}
-		}
-	}
-	return false, nil
 }
 
 // podVFIndexInHost retrieves the vf index on the host network namespace related to the given
