@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -13,6 +15,7 @@ import (
 	"github.com/openshift/sriov-network-operator/pkg/daemon"
 	"github.com/openshift/sriov-network-operator/pkg/version"
 	"github.com/spf13/cobra"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -31,6 +34,11 @@ var (
 	startOpts struct {
 		kubeconfig string
 		nodeName   string
+	}
+
+	// PlatformMap contains supported platforms for virtual VF
+	platformMap = map[string]daemon.PlatformType{
+		"openstack": daemon.Virtual,
 	}
 )
 
@@ -107,7 +115,19 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		destdir = "/host/etc"
 	}
 
-	platformType := daemon.Virtual
+	platformType := daemon.Baremetal
+
+	nodeInfo, err := kubeclient.CoreV1().Nodes().Get(context.Background(), startOpts.nodeName, v1.GetOptions{})
+	if err == nil {
+		for key, pType := range platformMap {
+			if strings.Contains(strings.ToLower(nodeInfo.Spec.ProviderID), strings.ToLower(key)) {
+				platformType = pType
+			}
+		}
+	} else {
+		glog.Warningf("Failed to fetch node state %s, %v!", startOpts.nodeName, err)
+	}
+	glog.V(0).Infof("Running on platform: %s", platformType.String())
 
 	// block the deamon process until nodeWriter finish first its run
 	nodeWriter.Run(stopCh, refreshCh, syncCh, destdir, true, platformType)

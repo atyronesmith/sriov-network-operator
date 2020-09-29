@@ -51,6 +51,17 @@ const (
 	Virtual
 )
 
+func (e PlatformType) String() string {
+	switch e {
+	case Baremetal:
+		return "Baremetal"
+	case Virtual:
+		return "Virtual"
+	default:
+		return fmt.Sprintf("%d", int(e))
+	}
+}
+
 const (
 	// updateDelay is the baseline speed at which we react to changes.  We don't
 	// need to react in milliseconds as any change would involve rebooting the node.
