@@ -114,6 +114,10 @@ spec:
                       type: integer
                     name:
                       type: string
+                    networkID:
+                      type: string
+                    networkTag:
+                      type: string
                     numVfs:
                       type: integer
                     pciAddress:
