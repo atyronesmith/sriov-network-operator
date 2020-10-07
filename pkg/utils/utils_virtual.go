@@ -151,7 +151,7 @@ func DiscoverSriovDevicesVirtual() ([]sriovnetworkv1.InterfaceExt, error) {
 			continue
 		}
 		metaData, networkData := readMetaData()
-		networkID, networkTag := parseMetaData(device.Address,metaData,networkData)
+		networkID, networkTag := parseMetaData(device.Address, metaData, networkData)
 
 		driver, err := dputils.GetDriverName(device.Address)
 		if err != nil {
