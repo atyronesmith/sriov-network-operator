@@ -264,7 +264,7 @@ var _ = Describe("[sriov] operator", func() {
 			intf := &sriovv1.InterfaceExt{}
 
 			validationFunction := func(networks []string, containsFunc func(line string) bool) {
-				podObj := pod.DefineWithNetworks(networks)
+				podObj := pod.RedefineWithNodeSelector(pod.DefineWithNetworks(networks), node)
 				err := clients.Create(context.Background(), podObj)
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(func() corev1.PodPhase {
@@ -318,7 +318,6 @@ var _ = Describe("[sriov] operator", func() {
 			}
 
 			BeforeEach(func() {
-				node := sriovInfos.Nodes[0]
 				Eventually(func() int64 {
 					testedNode, err := clients.Nodes().Get(context.Background(), node, metav1.GetOptions{})
 					Expect(err).ToNot(HaveOccurred())
@@ -729,14 +728,14 @@ var _ = Describe("[sriov] operator", func() {
 		})
 
 		Context("Virtual Functions", func() {
-			if discovery.Enabled() {
-				Skip("Virtual functions allocation test consumes all the available vfs, not suitable for discovery mode")
-				// TODO Split this so we check the allocation / unallocation but with a limited number of
-				// resources.
-			}
-
 			// 21396
 			It("should release the VFs once the pod deleted and same VFs can be used by the new created pods", func() {
+				if discovery.Enabled() {
+					Skip("Virtual functions allocation test consumes all the available vfs, not suitable for discovery mode")
+					// TODO Split this so we check the allocation / unallocation but with a limited number of
+					// resources.
+				}
+
 				By("Create first Pod which consumes all available VFs")
 				sriovDevice, err := sriovInfos.FindOneSriovDevice(node)
 				ipam := `{"type": "host-local","ranges": [[{"subnet": "3ffe:ffff:0:01ff::/64"}]],"dataDir": "/run/my-orchestrator/container-ipam-state"}`
