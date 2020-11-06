@@ -1,124 +1,15 @@
 package utils
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"path/filepath"
 	"strconv"
 
 	"github.com/golang/glog"
 	dputils "github.com/intel/sriov-network-device-plugin/pkg/utils"
 	"github.com/jaypipes/ghw"
-	sriovnetworkv1 "github.com/openshift/sriov-network-operator/pkg/apis/sriovnetwork/v1"
+	sriovnetworkv1 "github.com/openshift/sriov-network-operator/api/v1"
 )
-
-const (
-	ospMetaDataDir = "/host/var/config/openstack/latest/"
-	ospNetworkData = ospMetaDataDir + "/network_data.json"
-	ospMetaData    = ospMetaDataDir + "/meta_data.json"
-)
-
-// OSPMetaDataDevice -- Device structure within meta_data.json
-type OSPMetaDataDevice struct {
-	Vlan      int    `json:"vlan,omitempty"`
-	VfTrusted bool   `json:"vf_trusted,omitempty"`
-	Type      string `json:"type,omitempty"`
-	Mac       string `json:"mac,omitempty"`
-	Bus       string `json:"bus,omitempty"`
-	Address   string `json:"address,omitempty"`
-	Tags      string `json:"tags,omitempty"`
-}
-
-// OSPMetaData -- Openstack meta_data.json format
-type OSPMetaData struct {
-	UUID             string              `json:"uuid,omitempty"`
-	AdminPass        string              `json:"admin_pass,omitempty"`
-	Name             string              `json:"name,omitempty"`
-	LaunchIndex      int                 `json:"launch_index,omitempty"`
-	AvailabilityZone string              `json:"availability_zone,omitempty"`
-	ProjectID        string              `json:"project_id,omitempty"`
-	Devices          []OSPMetaDataDevice `json:"devices,omitempty"`
-}
-
-// OSPNetworkLink OSP Link metadata
-type OSPNetworkLink struct {
-	ID          string `json:"id"`
-	VifID       string `json:"vif_id,omitempty"`
-	Type        string `json:"type"`
-	Mtu         int    `json:"mtu,omitempty"`
-	EthernetMac string `json:"ethernet_mac_address"`
-}
-
-// OSPNetwork OSP Network metadata
-type OSPNetwork struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	Link      string `json:"link"`
-	NetworkID string `json:"network_id"`
-}
-
-// OSPNetworkData OSP Network metadata
-type OSPNetworkData struct {
-	Links    []OSPNetworkLink `json:"links,omitempty"`
-	Networks []OSPNetwork     `json:"networks,omitempty"`
-	// Omit Services
-}
-
-func readMetaData() (metaData *OSPMetaData, networkData *OSPNetworkData) {
-	networkData = &OSPNetworkData{}
-
-	rawBytes, err := ioutil.ReadFile(ospNetworkData)
-	if err != nil {
-		glog.Errorf("error reading file %s, %v", ospNetworkData, err)
-		return
-	}
-
-	if err = json.Unmarshal(rawBytes, networkData); err != nil {
-		glog.Errorf("error unmarshalling raw bytes %v from %s", err, ospNetworkData)
-		return
-	}
-
-	metaData = &OSPMetaData{}
-
-	rawBytes, err = ioutil.ReadFile(ospMetaData)
-	if err != nil {
-		glog.Errorf("error reading file %s, %v", ospMetaData, err)
-		return
-	}
-
-	if err = json.Unmarshal(rawBytes, metaData); err != nil {
-		glog.Errorf("error unmarshalling raw bytes %v from %s", err, ospNetworkData)
-		return
-	}
-
-	return
-}
-
-func parseMetaData(pciAddr string, metaData *OSPMetaData, networkData *OSPNetworkData) (networkID string, networkTag string) {
-
-	if metaData == nil || networkData == nil {
-		return
-	}
-
-	for _, device := range metaData.Devices {
-		if pciAddr == device.Address {
-			for _, link := range networkData.Links {
-				if device.Mac == link.EthernetMac {
-					for _, network := range networkData.Networks {
-						if network.Link == link.ID {
-							networkID = network.NetworkID
-							networkTag = device.Tags
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return
-}
 
 // DiscoverSriovDevicesVirtual discovers VFs on a virtual platform
 func DiscoverSriovDevicesVirtual() ([]sriovnetworkv1.InterfaceExt, error) {
@@ -146,13 +37,6 @@ func DiscoverSriovDevicesVirtual() ([]sriovnetworkv1.InterfaceExt, error) {
 			continue
 		}
 
-		if isVirtio(device.Address) {
-			// Do not include virtio devices
-			continue
-		}
-		metaData, networkData := readMetaData()
-		networkID, networkTag := parseMetaData(device.Address, metaData, networkData)
-
 		driver, err := dputils.GetDriverName(device.Address)
 		if err != nil {
 			glog.Warningf("DiscoverSriovDevicesVirtual(): unable to parse device driver for device %+v %q", device, err)
@@ -163,8 +47,6 @@ func DiscoverSriovDevicesVirtual() ([]sriovnetworkv1.InterfaceExt, error) {
 			Driver:     driver,
 			Vendor:     device.Vendor.ID,
 			DeviceID:   device.Product.ID,
-			NetworkID:  networkID,
-			NetworkTag: networkTag,
 		}
 		if mtu := getNetdevMTU(device.Address); mtu > 0 {
 			iface.Mtu = mtu
@@ -294,19 +176,4 @@ func configSriovDeviceVirtual(iface *sriovnetworkv1.Interface, ifaceStatus *srio
 		}
 	}
 	return nil
-}
-
-func isVirtio(pciAddr string) bool {
-	virtioFn, err := filepath.Glob(filepath.Join(sysBusPciDevices, pciAddr, "virtio*"))
-	if err != nil {
-		glog.Warningf("error reading virtio directories %v", err)
-		return false
-	}
-
-	glog.V(2).Infof("virtio: pci: %s, count: %d", pciAddr, len(virtioFn))
-	if len(virtioFn) > 0 {
-		return true
-	}
-
-	return false
 }

@@ -47,10 +47,6 @@ type SriovNetworkNicSelector struct {
 	RootDevices []string `json:"rootDevices,omitempty"`
 	// Name of SR-IoV PF.
 	PfNames []string `json:"pfNames,omitempty"`
-	// NetworkID of the OpenStack Network
-	NetworkID string `json:"networkID,omitempty"`
-	// Tag associated with of the OpenStack Network interface
-	NetworkTag string `json:"networkTag,omitempty"`
 }
 
 // SriovNetworkNodePolicyStatus defines the observed state of SriovNetworkNodePolicy

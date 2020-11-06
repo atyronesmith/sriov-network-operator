@@ -310,12 +310,6 @@ func (selector *SriovNetworkNicSelector) Selected(iface *InterfaceExt) bool {
 			return false
 		}
 	}
-	if selector.NetworkID != "" && selector.NetworkID != iface.NetworkID {
-		return false
-	}
-	if selector.NetworkTag != "" && selector.NetworkTag != iface.NetworkTag {
-		return false
-	}
 	return true
 }
 
