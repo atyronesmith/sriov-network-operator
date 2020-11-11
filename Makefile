@@ -43,8 +43,10 @@ build: _build-manager _build-sriov-network-config-daemon _build-webhook
 _build-%:
 	WHAT=$* hack/build-go.sh
 
-run:
-	hack/run-locally.sh
+_plugin-%: vet
+	@hack/build-plugins.sh $*
+
+plugins: _plugin-intel _plugin-mellanox _plugin-generic _plugin-virtual
 
 clean:
 	@rm -rf $(TARGET_DIR)
@@ -92,7 +94,7 @@ undeploy-k8s: undeploy
 _plugin-%:
 	@hack/build-plugins.sh $*
 
-plugins: _plugin-intel _plugin-mellanox _plugin-generic
+plugins: _plugin-intel _plugin-mellanox _plugin-generic _plugin-virtual
 
 verify-gofmt:
 ifeq (, $(GOFMT_CHECK))
